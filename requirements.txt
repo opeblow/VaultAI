@@ -1,0 +1,25 @@
+#---CORE ML & AI---
+openai-whisper
+torch
+torchaudio
+openai
+sentence-transformers
+
+#----DATA & INFRASTRUCTURE-----
+python-dotenv
+numpy
+faiss-cpu
+librosa
+
+#----BACKEND ---
+fastapi
+uvicorn
+python-multipart
+
+sqlalchemy
+passlib[bcrypt]
+python-jose[cryptography]
+pydantic-settings
+aiofiles
+email-validator
+
