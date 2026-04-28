@@ -61,6 +61,11 @@ def ask_question(
     
     try:
         pipeline = get_pipeline()
+        if pipeline is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="ML Pipeline not available"
+            )
         
         answer = pipeline.ask_ai(
             question=request.question
@@ -72,8 +77,11 @@ def ask_question(
         )
         
     except Exception as e:
+        raise
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process query"
+            detail=f"Failed to process query:{str(e)}"
         )
+        
     
