@@ -63,7 +63,6 @@ def ask_question(
         pipeline = get_pipeline()
         
         answer = pipeline.ask_ai(
-            podcast_id=request.podcast_id,
             question=request.question
         )
         
