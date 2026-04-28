@@ -74,7 +74,11 @@ def process_podcast_background(
         try:
             p = get_pipeline()
             
-            result = p.process_audio(file_path, title)
+            result = p.execute(
+                user_id=str(user_id),
+                podcast_id=str(podcast_id),
+                audio_input_path=file_path
+            )
             
             podcast.language = result.get("language", "unknown")
             podcast.duration = result.get("duration", 0.0)
@@ -87,7 +91,7 @@ def process_podcast_background(
             
         except Exception as e:
             job.status = JobStatusEnum.FAILED.value
-            job.error = "Processing failed"
+            job.error = str(e)
             podcast.status = JobStatusEnum.FAILED.value
             
             if os.path.exists(file_path):
