@@ -44,6 +44,7 @@ class User(Base):
     podcasts = relationship("Podcast", back_populates="user", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="user", cascade="all, delete-orphan")
     payments = relationship("Payment", back_populates="user", cascade="all, delete-orphan")
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
 
 
 class Podcast(Base):
@@ -86,9 +87,23 @@ class Payment(Base):
     amount = Column(Integer, nullable=False)
     provider = Column(String(50), default="paystack", nullable=False)
     status = Column(String(50), default=PaymentStatusEnum.PENDING.value, nullable=False)
+    reference = Column(String(255), unique=True, index=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     user = relationship("User", back_populates="payments")
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token = Column(String(500), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    revoked = Column(String(10), default="false", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    user = relationship("User", back_populates="refresh_tokens")
 
 
 from datetime import datetime
@@ -117,7 +132,25 @@ class UserLoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str = None
     token_type: str = "bearer"
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutResponse(BaseModel):
+    message: str = "Successfully logged out"
 
 
 class PodcastUploadRequest(BaseModel):

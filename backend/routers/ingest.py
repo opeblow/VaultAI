@@ -8,12 +8,14 @@ Implements file upload with background ML processing tasks.
 import os
 import uuid
 import aiofiles
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.database import get_db
-from backend.auth import get_current_user
+from backend.auth import get_current_user, decode_token
 from backend.models.schemas import User, Podcast, Job, JobStatusEnum
 from backend.models.schemas import (
     PodcastUploadRequest,
@@ -22,6 +24,8 @@ from backend.models.schemas import (
     ErrorResponse
 )
 from ml.pipelines.podcast_pipeline import PodcastPipeline
+
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(
     prefix="/ingest",
@@ -32,11 +36,25 @@ router = APIRouter(
         403: {"model": ErrorResponse, "description": "Forbidden - Plan limit exceeded"},
         404: {"model": ErrorResponse, "description": "Not Found"},
         413: {"model": ErrorResponse, "description": "Payload Too Large"},
+        429: {"model": ErrorResponse, "description": "Too Many Requests"},
         500: {"model": ErrorResponse, "description": "Internal Server Error"}
     }
 )
 
 pipeline = None
+
+ALLOWED_EXTENSIONS = {".mp3", ".mpeg", ".wav", ".m4a", ".ogg", ".flac"}
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+
+
+def get_user_key(request: Request):
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        payload = decode_token(token)
+        if payload and payload.get("sub"):
+            return f"user:{payload.get('sub')}"
+    return get_remote_address(request)
 
 
 def get_pipeline() -> PodcastPipeline:
@@ -115,80 +133,103 @@ def process_podcast_background(
     summary="Upload podcast audio file",
     description="Uploads an audio file and creates a processing job. The file is saved to storage and processed asynchronously."
 )
+@limiter.limit("10/hour", key_func=get_user_key)
 async def upload_podcast(
+    request: Request,
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(..., description="Audio file to upload (mp3, wav, m4a)"),
-    request: PodcastUploadRequest = Depends(lambda: None),
+    file: UploadFile = File(..., description="Audio file to upload (mp3, wav, m4a, m4a, ogg, flac)"),
+    request_obj: PodcastUploadRequest = Depends(lambda: None),
     title: str = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    from backend.config import check_plan_limit
-    
-    podcast_title = title if title else (request.title if request else None)
-    if not podcast_title:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Podcast title is required"
-        )
-    
-    podcast_count = db.query(Podcast).filter(Podcast.user_id == current_user.id).count()
-    
-    if not check_plan_limit(current_user.plan, podcast_count):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"You have reached your plan limit. Upgrade to upload more podcasts."
-        )
-    
-    audio_dir = os.path.join(settings.STORAGE_PATH, "users", str(current_user.id), "audio")
-    os.makedirs(audio_dir, exist_ok=True)
-    
-    file_ext = os.path.splitext(file.filename)[1] if file.filename else ".mp3"
-    unique_filename = f"{uuid.uuid4()}{file_ext}"
-    file_path = os.path.join(audio_dir, unique_filename)
-    
-    async with aiofiles.open(file_path, 'wb') as out_file:
+    try:
+        from backend.config import check_plan_limit
+        
+        podcast_title = title if title else (request.title if request else None)
+        if not podcast_title:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Podcast title is required"
+            )
+        
+        if not file.filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Filename is required"
+            )
+        
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid file format. Allowed formats: {', '.join(ext[1:] for ext in ALLOWED_EXTENSIONS)}"
+            )
+        
+        podcast_count = db.query(Podcast).filter(Podcast.user_id == current_user.id).count()
+        
+        if not check_plan_limit(current_user.plan, podcast_count):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"You have reached your plan limit. Upgrade to upload more podcasts."
+            )
+        
+        audio_dir = os.path.join(settings.STORAGE_PATH, "users", str(current_user.id), "audio")
+        os.makedirs(audio_dir, exist_ok=True)
+        
+        unique_filename = f"{uuid.uuid4()}{file_ext}"
+        file_path = os.path.join(audio_dir, unique_filename)
+        
         content = await file.read()
-        await out_file.write(content)
-    
-    if len(content) > 100 * 1024 * 1024:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="File too large. Maximum size is 100MB."
+        
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File too large. Maximum size is 100MB."
+            )
+        
+        async with aiofiles.open(file_path, 'wb') as out_file:
+            await out_file.write(content)
+        
+        podcast = Podcast(
+            user_id=current_user.id,
+            title=podcast_title,
+            status=JobStatusEnum.PROCESSING.value,
+            vault_path=file_path
         )
-    
-    podcast = Podcast(
-        user_id=current_user.id,
-        title=podcast_title,
-        status=JobStatusEnum.PROCESSING.value,
-        vault_path=file_path
-    )
-    db.add(podcast)
-    db.flush()
-    
-    job = Job(
-        user_id=current_user.id,
-        podcast_id=podcast.id,
-        status=JobStatusEnum.PROCESSING.value
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-    db.refresh(podcast)
-    
-    background_tasks.add_task(
-        process_podcast_background,
-        job_id=job.id,
-        podcast_id=podcast.id,
-        file_path=file_path,
-        user_id=current_user.id,
-        title=podcast_title
-    )
-    
-    return PodcastUploadResponse(
-        job_id=job.id,
-        status="processing"
-    )
+        db.add(podcast)
+        db.flush()
+        
+        job = Job(
+            user_id=current_user.id,
+            podcast_id=podcast.id,
+            status=JobStatusEnum.PROCESSING.value
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        db.refresh(podcast)
+        
+        background_tasks.add_task(
+            process_podcast_background,
+            job_id=job.id,
+            podcast_id=podcast.id,
+            file_path=file_path,
+            user_id=current_user.id,
+            title=podcast_title
+        )
+        
+        return PodcastUploadResponse(
+            job_id=job.id,
+            status="processing"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Upload failed: {str(e)}"
+        )
 
 
 @router.get(
@@ -202,19 +243,27 @@ def get_job_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    job = db.query(Job).filter(
-        Job.id == job_id,
-        Job.user_id == current_user.id
-    ).first()
-    
-    if not job:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Job not found"
+    try:
+        job = db.query(Job).filter(
+            Job.id == job_id,
+            Job.user_id == current_user.id
+        ).first()
+        
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Job not found"
+            )
+        
+        return JobStatusResponse(
+            job_id=job.id,
+            status=job.status,
+            error=job.error
         )
-    
-    return JobStatusResponse(
-        job_id=job.id,
-        status=job.status,
-        error=job.error
-    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get job status: {str(e)}"
+        )
