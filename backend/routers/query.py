@@ -14,7 +14,6 @@ from backend.database import get_db
 from backend.auth import get_current_user, decode_token
 from backend.models.schemas import User, Podcast, JobStatusEnum
 from backend.models.schemas import QueryAskRequest, QueryAskResponse, ErrorResponse
-from ml.pipelines.podcast_pipeline import PodcastPipeline
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -41,7 +40,7 @@ def get_user_key(request: Request):
     return get_remote_address(request)
 
 
-def get_pipeline() -> PodcastPipeline:
+def get_pipeline() -> "PodcastPipeline":
     from backend.routers.ingest import get_pipeline as ing_get_pipeline
     return ing_get_pipeline()
 

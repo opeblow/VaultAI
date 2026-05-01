@@ -41,6 +41,8 @@ class Embedder:
 
     def search(self,query,k=3):
         """Find top k most similar parts of the podcast"""
+        if self.index is None:
+            return []
         query_vector = self.model.encode([query]).astype('float32')
         distances , indices = self.index.search(query_vector , k)
         results = [self.paragraphs[i] for i in indices[0] if i != -1]

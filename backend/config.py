@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     
     STORAGE_PATH: str = "storage"
     
-    CORS_ORIGINS: list = ["*"]
+    CORS_ORIGINS: list[str] = ["*"]
     
     PLAN_LIMITS: dict = {
         "free": 3,

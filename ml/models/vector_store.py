@@ -25,7 +25,7 @@ class VectorMachine:
         return target_path
     
     def load_index(self,user_id,podcast_id):
-        target_path = os.path.jin(self.base_storage,str(user_id),"indices",str(podcast_id))
+        target_path = os.path.join(self.base_storage,str(user_id),"indices",str(podcast_id))
         if not os.path.exists(target_path):
             raise FileNotFoundError(f"Index not found for {user_id}/{podcast_id}")
         

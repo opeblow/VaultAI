@@ -23,7 +23,6 @@ from backend.models.schemas import (
     JobStatusResponse,
     ErrorResponse
 )
-from ml.pipelines.podcast_pipeline import PodcastPipeline
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -57,7 +56,7 @@ def get_user_key(request: Request):
     return get_remote_address(request)
 
 
-def get_pipeline() -> PodcastPipeline:
+def get_pipeline() -> "PodcastPipeline":
     global pipeline
     if pipeline is None:
         raise HTTPException(
@@ -67,7 +66,7 @@ def get_pipeline() -> PodcastPipeline:
     return pipeline
 
 
-def set_pipeline(p: PodcastPipeline):
+def set_pipeline(p: "PodcastPipeline"):
     global pipeline
     pipeline = p
 

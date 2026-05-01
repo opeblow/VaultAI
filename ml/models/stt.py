@@ -102,7 +102,8 @@ class SpeechToText():
         HOST:Let's talk about AI...
         
         """
-        segments = self.transcribe_with_timestamps(audio_path)
+        result = self.transcribe_with_timestamps(audio_path)
+        segments = result[0] if isinstance(result, tuple) else result
         lines = []
         current_speaker = None
         current_text = []
