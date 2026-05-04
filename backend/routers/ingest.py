@@ -8,7 +8,7 @@ Implements file upload with background ML processing tasks.
 import os
 import uuid
 import aiofiles
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
@@ -17,12 +17,7 @@ from backend.config import settings
 from backend.database import get_db
 from backend.auth import get_current_user, decode_token
 from backend.models.schemas import User, Podcast, Job, JobStatusEnum
-from backend.models.schemas import (
-    PodcastUploadRequest,
-    PodcastUploadResponse,
-    JobStatusResponse,
-    ErrorResponse
-)
+from backend.models.schemas import PodcastUploadResponse, JobStatusResponse, ErrorResponse
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -101,6 +96,7 @@ def process_podcast_background(
             podcast.duration = result.get("duration", 0.0)
             podcast.speaker_count = result.get("speaker_count", 0)
             podcast.summary = result.get("summary", "")
+            podcast.vault_path = result.get("vault_path", podcast.vault_path)
             podcast.status = JobStatusEnum.COMPLETED.value
             
             job.status = JobStatusEnum.COMPLETED.value
@@ -137,15 +133,14 @@ async def upload_podcast(
     request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="Audio file to upload (mp3, wav, m4a, m4a, ogg, flac)"),
-    request_obj: PodcastUploadRequest = Depends(lambda: None),
-    title: str = None,
+    title: str = Form(..., min_length=1, max_length=500),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     try:
         from backend.config import check_plan_limit
         
-        podcast_title = title if title else (request.title if request else None)
+        podcast_title = title.strip()
         if not podcast_title:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

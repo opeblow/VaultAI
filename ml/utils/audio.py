@@ -1,6 +1,5 @@
 import os
 import logging
-import whisper
 from typing import Dict
 import subprocess
 
@@ -13,6 +12,18 @@ SUPPORTED_FORMATS ={
     ".mov",".avi",".mkv",".opus",".amr"
 }
 CONVERSION_NEEDED_FORMATS = {".wma",".amr",".opus"}
+
+
+def _load_whisper():
+    try:
+        import whisper
+    except ImportError as exc:
+        raise RuntimeError(
+            "openai-whisper is required for audio transcription. Install the ML "
+            "requirements before running ingestion."
+        ) from exc
+    return whisper
+
 
 def load_and_process(audio_path:str)->str:
     if not os.path.exists(audio_path):
@@ -36,6 +47,7 @@ def load_and_process(audio_path:str)->str:
     logger.info(f"Audio ready - size:{os.path.getsize(audio_path)/(1024 * 1024):.2f}MB")
 
     try:
+         whisper = _load_whisper()
          audio = whisper.load_audio(audio_path)
          duration = len(audio) / whisper.audio.SAMPLE_RATE
          logger.info(f"Audio Processed successfully - duration :{duration:.1f}s")
@@ -51,6 +63,7 @@ def get_duration(audio_path:str)->float:
      if not os.path.exists(audio_path):
           raise FileNotFoundError(f"Audio file not found :{audio_path}")
      
+     whisper = _load_whisper()
      audio = whisper.load_audio(audio_path)
      duration = len(audio) / whisper.audio.SAMPLE_RATE
 

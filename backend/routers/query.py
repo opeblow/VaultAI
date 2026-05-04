@@ -83,8 +83,15 @@ def ask_question(
                 detail="ML Pipeline not available"
             )
         
+        if not podcast.vault_path:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Podcast vault path is missing"
+            )
+
         answer = pipeline.ask_ai(
-            question=request_body.question
+            question=request_body.question,
+            vault_path=podcast.vault_path,
         )
         
         return QueryAskResponse(

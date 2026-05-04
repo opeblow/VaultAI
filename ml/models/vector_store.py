@@ -1,7 +1,18 @@
-import faiss
-import numpy as np
 import os
 import pickle
+
+
+def _load_vector_deps():
+    try:
+        import faiss
+        import numpy as np
+    except ImportError as exc:
+        raise RuntimeError(
+            "faiss-cpu and numpy are required for vector storage. Install the ML "
+            "requirements before running ingestion or podcast queries."
+        ) from exc
+    return faiss, np
+
 
 class VectorMachine:
     def __init__(self,base_storage="storage/users"):
@@ -13,6 +24,7 @@ class VectorMachine:
         return path
     
     def create_index(self,user_id,podcast_id,chunks,embeddings):
+        faiss, np = _load_vector_deps()
         target_path = self._get_path(user_id,podcast_id)
         dimension = len(embeddings[0])
         index = faiss.IndexFlatL2(dimension)
@@ -25,6 +37,7 @@ class VectorMachine:
         return target_path
     
     def load_index(self,user_id,podcast_id):
+        faiss, _ = _load_vector_deps()
         target_path = os.path.join(self.base_storage,str(user_id),"indices",str(podcast_id))
         if not os.path.exists(target_path):
             raise FileNotFoundError(f"Index not found for {user_id}/{podcast_id}")

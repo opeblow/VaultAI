@@ -6,15 +6,18 @@ Uses PostgreSQL database with SQLAlchemy ORM.
 """
 
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-import os
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+from backend.config import settings
+
+connect_args = {}
+if settings.DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
 
 engine = create_engine(
-    DATABASE_URL or "sqlite:///fallback.db",
-    echo=True
+    settings.DATABASE_URL,
+    echo=settings.DEBUG,
+    connect_args=connect_args,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -22,7 +25,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-def get_db() :
+def get_db():
     db = SessionLocal()
     try:
         yield db

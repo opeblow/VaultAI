@@ -55,8 +55,8 @@ def initialize_ml_pipeline():
         ml_pipeline = pipeline
         return pipeline
         
-    except ImportError:
-        print("Warning: ML pipeline not available. Install ml-pipeline package.")
+    except ImportError as e:
+        print(f"Warning: ML pipeline imports are not available: {str(e)}")
         return None
     except Exception as e:
         print(f"Warning: Failed to initialize ML pipeline: {str(e)}")
@@ -179,7 +179,7 @@ async def global_exception_handler(request, exc):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
+        "backend.main:app",
         host="0.0.0.0",
         port=8000,
         reload=settings.DEBUG

@@ -1,6 +1,8 @@
 import os
 import json
-from ml.utils.audio import load_and_process
+from typing import Optional
+
+from ml.utils.audio import load_and_process, get_duration
 from ml.utils.text import chunk_text,clean_text
 from ml.models.stt import SpeechToText
 from ml.models.summarizer import Summarizer
@@ -24,6 +26,7 @@ class PodcastPipeline:
         print(f"\n [GLOBAL INGESTION] Initiating for user {user_id}")
 
         processed_audio_path = load_and_process(audio_input_path)
+        duration = get_duration(processed_audio_path)
         print("Generating speaker-aware transcript")
         labeled_segments , language_info = self.stt_engine.transcribe_with_timestamps(processed_audio_path)
         speaker_transcript = "\n".join([s["labeled_text"] for s in labeled_segments])
@@ -38,7 +41,7 @@ class PodcastPipeline:
             "storage","users",str(user_id),"indices",str(podcast_id)
         )
         os.makedirs(user_vault_path,exist_ok=True)
-        self.embedder_engine.add_to_index(chunks)
+        self.embedder_engine.add_to_index(chunks, reset=True)
         self.embedder_engine.save(folder_path = user_vault_path)
         self.vector_store.current_vault_path = user_vault_path
 
@@ -64,12 +67,12 @@ class PodcastPipeline:
             "language":language_info,
             "summary":summary,
             "vault_path":user_vault_path,
+            "duration":duration,
             "labeled_segments":labeled_segments,
             "speaker_count":len(speakers_found),
             "speakers":speakers_found
         }
 
-    def ask_ai(self, question: str) -> str:
+    def ask_ai(self, question: str, vault_path: Optional[str] = None) -> str:
         print(f" AI Query : '{question}'")
-        return self.qa_machine.ask(user_question=question)
-
+        return self.qa_machine.ask(user_question=question, vault_path=vault_path)
