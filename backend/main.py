@@ -1,188 +1,47 @@
-"""
-VaultAI Backend Application
-
-This is the main entry point for the VaultAI FastAPI backend application.
-It initializes the database, ML pipeline, and registers all API routers.
-
-Production-grade implementation with:
-- FastAPI latest version
-- PostgreSQL database with SQLAlchemy ORM
-- JWT authentication with refresh tokens
-- Rate limiting with slowapi
-- CORS enabled for all origins
-- Background tasks for ML processing
-- Swagger UI and ReDoc documentation
-"""
-
-import os
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, status
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from slowapi.middleware import SlowAPIMiddleware
 
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-
-from backend.config import settings
-from backend.database import create_tables
-from backend.models.schemas import HealthCheckResponse
-from backend.routers import (
-    auth_router,
-    ingest_router,
-    query_router,
-    vaults_router,
-    payments_router
-)
-from backend.routers.ingest import set_pipeline as set_ingest_pipeline
-
-limiter = Limiter(key_func=get_remote_address)
-
-
-ml_pipeline = None
-
-
-def initialize_ml_pipeline():
-    global ml_pipeline
-    
-    try:
-        from ml.pipelines.podcast_pipeline import PodcastPipeline
-        
-        pipeline = PodcastPipeline()
-        
-        set_ingest_pipeline(pipeline)
-        
-        ml_pipeline = pipeline
-        return pipeline
-        
-    except ImportError:
-        print("Warning: ML pipeline not available. Install ml-pipeline package.")
-        return None
-    except Exception as e:
-        print(f"Warning: Failed to initialize ML pipeline: {str(e)}")
-        return None
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    create_tables()
-    
-    initialize_ml_pipeline()
-    
-    os.makedirs(settings.STORAGE_PATH, exist_ok=True)
-    os.makedirs(os.path.join(settings.STORAGE_PATH, "users"), exist_ok=True)
-    
-    yield
-    
-    global ml_pipeline
-    ml_pipeline = None
-
+from backend.routers import auth_router, payments_router, upload_router
+from backend.database import Base, engine
+from backend.models import *
 
 app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
-    description="""
-## VaultAI - AI Audio Intelligence Platform
-
-VaultAI is a production-grade AI audio intelligence platform that helps users:
-
-- **Upload and process podcast audio files**
-- **Get AI-generated summaries and insights**
-- **Query podcasts with natural language**
-- **Manage subscription plans**
-
-### Authentication
-
-Most endpoints require JWT authentication. To authenticate:
-1. Register a new user at `/auth/register`
-2. Login at `/auth/login` to get an access token
-3. Include the token in the Authorization header: `Bearer <token>`
-
-### Plans
-
-- **Free**: 3 episodes maximum
-- **Creator**: 20 episodes maximum
-- **Studio**: Unlimited episodes
-
-### Rate Limiting
-
-- `/auth/login`: 5 requests/minute per IP
-- `/auth/register`: 3 requests/minute per IP
-- `/ingest/upload`: 10 requests/hour per user
-- `/query/ask`: 30 requests/hour per user
-    """,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    lifespan=lifespan
+    title="Podcast AI SaaS API",
+    description="API for Podcast AI processing, auth, payments",
+    version="1.0.0",
+    swagger_ui_parameters={"persistAuthorization": True},
 )
 
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# Configure BearerAuth security scheme
+app.openapi_components = {
+    "securitySchemes": {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+    }
+}
 
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(auth_router)
-app.include_router(ingest_router)
-app.include_router(query_router)
-app.include_router(vaults_router)
-app.include_router(payments_router)
+# Add SlowAPI middleware for rate limiting
+app.add_middleware(SlowAPIMiddleware)
 
+# Include routers with prefixes
+app.include_router(auth_router, prefix="/auth")
+app.include_router(payments_router, prefix="/payments")
+app.include_router(upload_router, prefix="/upload")
 
-@app.get(
-    "/health",
-    response_model=HealthCheckResponse,
-    tags=["Health Check"],
-    summary="Health check endpoint",
-    description="Returns the health status of the VaultAI API."
-)
-def health_check():
-    return HealthCheckResponse(
-        status="healthy",
-        message="VaultAI API is running"
-    )
-
-
-@app.get(
-    "/",
-    tags=["Root"],
-    summary="Root endpoint",
-    description="Returns welcome message and API information."
-)
-def root():
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={
-            "name": settings.APP_NAME,
-            "version": settings.APP_VERSION,
-            "status": "running",
-            "docs": "/docs",
-            "redoc": "/redoc",
-            "health": "/health"
-        }
-    )
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "An internal server error occurred"}
-    )
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=settings.DEBUG
-    )
-
-    
+@app.on_event("startup")
+def startup_event():
+    """Create database tables on startup"""
+    Base.metadata.create_all(bind=engine)
